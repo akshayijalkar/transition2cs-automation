@@ -128,8 +128,12 @@ def main():
     drive, youtube = api_services()
     expected = required("YOUTUBE_CHANNEL_ID")
     items = youtube.channels().list(part="id,snippet", mine=True).execute().get("items", [])
+    print("Expected YouTube channel ID:", expected)
+    for item in items:
+        print("Authorized YouTube channel:", item.get("snippet", {}).get("title", "Unknown"))
+        print("Authorized YouTube channel ID:", item["id"])
     if len(items) != 1 or items[0]["id"] != expected:
-        raise RuntimeError("OAuth channel does not match Transition2CS; refusing upload")
+        raise RuntimeError("OAuth channel does not match Transition2CS; refusing upload. No uploads attempted.")
     print("Verified YouTube channel:", items[0]["snippet"]["title"])
     queue = get_queue(drive)
     print("Drive MP4 files available:", len(queue))
