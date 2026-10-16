@@ -8,6 +8,7 @@ import re
 import time
 import requests
 from google.oauth2.credentials import Credentials
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
@@ -33,7 +34,16 @@ def credentials(refresh_token, scopes):
         client_secret=required("YOUTUBE_CLIENT_SECRET"),
         scopes=scopes,
     )
-    c.refresh(Request())
+    try:
+        c.refresh(Request())
+    except RefreshError as exc:
+        # Do not print access or refresh tokens in GitHub logs.
+        msg = str(exc)
+        if 'invalid_grant' in msg:
+            raise RuntimeError('DRIVE/YOUTUBE OAuth refresh token rejected (invalid_grant). Re-authorize the affected service using the same OAuth client, replace only its GitHub secret, and rerun with UPLOAD_ENABLED=false. No upload attempted.') from None
+        if 'unauthorized_client' in msg or 'invalid_client' in msg:
+            raise RuntimeError('Google rejected the OAuth client. Verify its ID/secret pair against the Google Cloud OAuth client. No upload attempted.') from None
+        raise RuntimeError('Google OAuth token refresh failed. Check account authorization and secret configuration; no upload attempted.') from None
     return c
 
 def api_services():
