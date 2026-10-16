@@ -61,7 +61,7 @@ def get_queue(drive):
         response = drive.files().list(
             q="'%s' in parents and trashed = false and (mimeType = 'video/mp4' or name contains '.mp4')" % folder,
             fields="nextPageToken,files(id,name,mimeType,size,createdTime)",
-            page_size=100, page_token=token,
+            pageSize=100, pageToken=token,
             orderBy="createdTime asc",
             supportsAllDrives=True, includeItemsFromAllDrives=True
         ).execute()
