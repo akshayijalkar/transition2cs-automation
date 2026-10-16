@@ -6,6 +6,8 @@ import json
 import os
 import re
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import requests
 from google.oauth2.credentials import Credentials
 from google.auth.exceptions import RefreshError
@@ -92,7 +94,7 @@ def fetch_ledger():
 def save_ledger(data, sha):
     import base64
     payload = {
-        "message": "Record claimed Transition2CS Drive video",
+        "message": "Update Transition2CS Drive upload ledger",
         "content": base64.b64encode((json.dumps(data, indent=2, sort_keys=True) + "\n").encode()).decode(),
         "branch": "main"
     }
@@ -143,24 +145,35 @@ def main():
             print("Queued:", f["name"], "ID:", f["id"])
         return
     data, sha = fetch_ledger()
+    today_ist = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    # At most ONE successful or claimed upload per India calendar day.
+    claimed_today = any(v.get("dayIST") == today_ist for v in data.values())
+    if claimed_today:
+        print("An upload has already been claimed today (IST). Skipping.")
+        return
     pending = [f for f in queue if f["id"] not in data]
     if not pending:
         print("No unprocessed MP4; nothing uploaded.")
         return
     chosen = pending[0]
-    # Claim FIRST to avoid unintended duplicate public posts if later stages fail.
-    data[chosen["id"]] = {"name": chosen["name"], "state": "claimed",
-                           "claimedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    # Claim the Drive ID BEFORE uploading; never retry uncertain uploads automatically.
+    data[chosen["id"]] = {
+        "name": chosen["name"], "state": "claimed", "dayIST": today_ist,
+        "claimedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    }
     save_ledger(data, sha)
     print("Claimed video:", chosen["name"], "ID:", chosen["id"])
+    # Fetch fresh ledger sha for later state update.
     path = download_video(drive, chosen)
     title = re.sub(r"[_-]+", " ", chosen["name"].rsplit(".", 1)[0]).strip()[:85] or "Transition2CS"
     privacy = os.getenv("YOUTUBE_PRIVACY", "private").lower()
     if privacy not in ("private", "unlisted", "public"):
         raise RuntimeError("Invalid YouTube privacy setting")
+    if privacy == "public" and os.getenv("PUBLIC_UPLOAD_CONFIRMED") != "true":
+        raise RuntimeError("Public upload requires PUBLIC_UPLOAD_CONFIRMED=true")
     body = {
         "snippet": {
-            "title": title + " | Transition2CS #Shorts",
+            "title": (title[:76] + " | Transition2CS #Shorts")[:100],
             "description": "Educational AI-generated visual created with Google Flow/Veo. #Transition2CS #ComputerScience #Shorts",
             "categoryId": "28",
             "tags": ["Transition2CS", "Computer Science", "AI"]
@@ -177,7 +190,11 @@ def main():
     while response is None:
         _, response = request.next_chunk()
     print("Upload succeeded. Video ID:", response["id"], "Privacy:", privacy)
-    # Claimed entries are intentionally never retried automatically.
+    # Saving video ID is best effort, never risk automatic duplicate re-upload.
+    data_latest, latest_sha = fetch_ledger()
+    if chosen["id"] in data_latest:
+        data_latest[chosen["id"]].update({"state": "uploaded", "youtubeVideoId": response["id"]})
+        save_ledger(data_latest, latest_sha)
 
 if __name__ == "__main__":
     main()
