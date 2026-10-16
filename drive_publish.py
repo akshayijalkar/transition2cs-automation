@@ -144,6 +144,11 @@ def main():
         for f in queue[:5]:
             print("Queued:", f["name"], "ID:", f["id"])
         return
+    privacy = os.getenv("YOUTUBE_PRIVACY", "private").lower()
+    if privacy not in ("private", "unlisted", "public"):
+        raise RuntimeError("Invalid YouTube privacy setting")
+    if privacy == "public" and os.getenv("PUBLIC_UPLOAD_CONFIRMED") != "true":
+        raise RuntimeError("Public upload requires PUBLIC_UPLOAD_CONFIRMED=true")
     data, sha = fetch_ledger()
     today_ist = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
     # At most ONE successful or claimed upload per India calendar day.
@@ -166,11 +171,6 @@ def main():
     # Fetch fresh ledger sha for later state update.
     path = download_video(drive, chosen)
     title = re.sub(r"[_-]+", " ", chosen["name"].rsplit(".", 1)[0]).strip()[:85] or "Transition2CS"
-    privacy = os.getenv("YOUTUBE_PRIVACY", "private").lower()
-    if privacy not in ("private", "unlisted", "public"):
-        raise RuntimeError("Invalid YouTube privacy setting")
-    if privacy == "public" and os.getenv("PUBLIC_UPLOAD_CONFIRMED") != "true":
-        raise RuntimeError("Public upload requires PUBLIC_UPLOAD_CONFIRMED=true")
     body = {
         "snippet": {
             "title": (title[:76] + " | Transition2CS #Shorts")[:100],
