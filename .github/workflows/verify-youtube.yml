@@ -48,7 +48,17 @@ jobs:
               headers={"Authorization":f"Bearer {creds.token}"},
               timeout=30
           )
-          response.raise_for_status()
+          if response.status_code != 200:
+              try:
+                  details = response.json().get("error", {})
+                  reasons = [x.get("reason", "") for x in details.get("errors", [])]
+                  print("YouTube API status:", response.status_code)
+                  print("Google error:", details.get("status", "unknown"))
+                  print("Google message:", details.get("message", "No details returned"))
+                  print("Reason codes:", ", ".join(reasons) or "not provided")
+              except ValueError:
+                  print("YouTube API status:", response.status_code, "(non-JSON error)")
+              raise SystemExit("Channel verification failed. No uploads attempted.")
           channels = response.json().get("items", [])
 
           assert channels, "No authorized YouTube channel found"
