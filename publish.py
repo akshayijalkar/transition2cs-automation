@@ -1,87 +1,68 @@
-"""Transition2CS: use a pre-tested Hugging Face Gradio Wan 2.2 Space.
-Expected Gradio endpoint: /generate(prompt) -> video path/file.
-Not enabled until connected and tested; no paid APIs used.
-"""
-import datetime as dt
-import hashlib
-import os
-from pathlib import Path
+"""Daily Transition2CS publisher; never posts without explicit upload gate."""
+import os, pathlib, datetime, json, hashlib
 from gradio_client import Client, handle_file
-from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 TOPICS = [
-    "How the internet routes packets",
-    "What happens when you type a URL",
-    "Cloud computing explained visually",
-    "Encryption and secure communication",
-    "How AI neural networks learn",
-    "Docker containers versus virtual machines",
-    "What is a firewall",
-    "How Kubernetes schedules workloads",
-    "How DNS works",
-    "What is zero trust security",
+    ("What happens when you open a website?", "A vivid 3D visualization of packets traveling through a network router to a web server, glowing fiber optic lines, cinematic technical illustration, no text, vertical composition"),
+    ("How cloud computing works", "Cinematic 3D visualization of cloud data centers and distributed servers exchanging glowing data packets, technical education video, no text, vertical composition"),
+    ("What is cybersecurity?", "Cinematic blue cyber security shield protecting a stream of encrypted network packets from red malicious nodes, clean technical visual, no text, vertical composition"),
+    ("How AI learns patterns", "Cinematic visualization of an artificial neural network lighting up as signals pass between connected neurons, beautiful technical animation, no text, vertical composition"),
+    ("Inside a computer network", "Cinematic technical visualization of a local area network, glowing nodes, routers and switches communicating, blue highlights, no text, vertical composition")
 ]
 
-def main():
-    now = dt.datetime.now(IST)
-    day = now.date().isoformat()
-    ix = int(hashlib.sha256(day.encode()).hexdigest(), 16) % len(TOPICS)
-    topic = TOPICS[ix]
-    prompt = (
-        f"Create a visually engaging 9:16 educational short about: {topic}. "
-        "Clear accurate on-screen visual metaphors, clean modern technology style, "
-        "cinematic motion, polished visual sequence, no trademarked characters, "
-        "no fake credentials, no false security claims."
-    )
-    print("Date:", day, "Topic:", topic)
-    client = Client(os.environ["HF_SPACE"], token=os.environ["HF_TOKEN"])
-    result = client.predict(prompt, api_name="/generate")
-    if isinstance(result, dict):
-        result = result.get("video") or result.get("path") or result.get("name")
-    elif isinstance(result, (list, tuple)):
-        result = result[0]
-    if not isinstance(result, str):
-        raise RuntimeError("Space did not return a local video path; adapter needed.")
-    video = Path(result)
-    if not video.is_file() or video.stat().st_size < 10000:
-        raise RuntimeError("No valid video file returned; no upload performed.")
+def required(key):
+    value = os.environ.get(key, '').strip()
+    if not value:
+        raise RuntimeError(f'Missing required setting: {key}')
+    return value
 
-    creds = Credentials(
-        token=None,
-        refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id=os.environ["GOOGLE_CLIENT_ID"],
-        client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
-        scopes=["https://www.googleapis.com/auth/youtube.upload"],
+def main():
+    if os.environ.get('UPLOAD_ENABLED', '').lower() != 'true':
+        print('UPLOAD_ENABLED is not true. No generation or upload attempted.'); return
+    hf_space = required('HF_SPACE_ID')
+    hf_token = required('HF_TOKEN')
+    expected_channel = required('YOUTUBE_CHANNEL_ID')
+    today = datetime.date.today()
+    title, prompt = TOPICS[today.toordinal() % len(TOPICS)]
+    client = Client(hf_space, token=hf_token)
+    # A compatible Space must expose generate(prompt: str) -> file on /generate.
+    result = client.predict(prompt=prompt, api_name='/generate')
+    if isinstance(result, (list, tuple)):
+        result = result[0]
+    if isinstance(result, dict):
+        result = result.get('video') or result.get('path')
+    video_path = pathlib.Path(result)
+    if not video_path.exists() or video_path.stat().st_size < 100_000:
+        raise RuntimeError('No valid video returned from Hugging Face')
+    credentials = Credentials(
+        None,
+        refresh_token=required('YOUTUBE_REFRESH_TOKEN'),
+        token_uri='https://oauth2.googleapis.com/token',
+        client_id=required('YOUTUBE_CLIENT_ID'),
+        client_secret=required('YOUTUBE_CLIENT_SECRET'),
+        scopes=['https://www.googleapis.com/auth/youtube.upload', 'https://www.googleapis.com/auth/youtube.readonly']
     )
-    creds.refresh(Request())
-    youtube = build("youtube", "v3", credentials=creds)
-    title = f"{topic} in seconds #Shorts"
+    credentials.refresh(Request())
+    youtube = build('youtube', 'v3', credentials=credentials)
+    mine = youtube.channels().list(part='id,snippet', mine=True).execute().get('items', [])
+    if not mine or mine[0]['id'] != expected_channel:
+        raise RuntimeError('Authorized channel does not match YOUTUBE_CHANNEL_ID: REFUSING upload.')
     body = {
-        "snippet": {
-            "title": title[:100],
-            "description": f"Learn about {topic}. AI-generated visuals; verify any technical concepts independently. #Transition2CS #Shorts #ComputerScience",
-            "categoryId": "27",
-        },
-        "status": {
-            "privacyStatus": os.getenv("YOUTUBE_PRIVACY", "private"),
-            "selfDeclaredMadeForKids": False,
-            "containsSyntheticMedia": True,
-        },
+        'snippet': {'title': title + ' | Transition2CS #Shorts',
+                    'description': 'Visual AI-generated illustration of a computer science concept. #ComputerScience #AI #Shorts',
+                    'categoryId': '28', 'tags': ['Computer Science', 'Transition2CS', 'AI']},
+        'status': {'privacyStatus': 'public', 'selfDeclaredMadeForKids': False, 'containsSyntheticMedia': True}
     }
-    request = youtube.videos().insert(
-        part="snippet,status",
-        body=body,
-        media_body=MediaFileUpload(str(video), mimetype="video/mp4", resumable=True),
-    )
+    request = youtube.videos().insert(part='snippet,status', body=body,
+        media_body=MediaFileUpload(str(video_path), mimetype='video/mp4', resumable=True))
     response = None
     while response is None:
         _, response = request.next_chunk()
-    print("YouTube upload ID:", response.get("id"))
+    print('Uploaded video ID:', response['id'])
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
