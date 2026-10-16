@@ -64,9 +64,11 @@ jobs:
           assert channels, "No authorized YouTube channel found"
           channel = channels[0]
 
-          assert channel["id"] == os.environ["EXPECTED_CHANNEL"], (
-              "Authorized YouTube channel does not match!"
-          )
+          print("Authorized channel name:", channel["snippet"]["title"])
+          print("Authorized channel ID:", channel["id"])
+          print("Expected channel ID:", os.environ["EXPECTED_CHANNEL"])
+          if channel["id"] != os.environ["EXPECTED_CHANNEL"]:
+              raise SystemExit("CHANNEL MISMATCH: OAuth selected another YouTube channel. No uploads attempted.")
           print("YouTube authorization: SUCCESS")
           print("Channel:", channel["snippet"]["title"])
           print("Channel ID:", channel["id"])
